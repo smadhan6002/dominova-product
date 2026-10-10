@@ -1,0 +1,118 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-brand-border;
+  }
+
+  body {
+    @apply bg-brand-black text-brand-text;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-brand-black;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-brand-surface rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-brand-border-light;
+  }
+
+  /* Focus styles */
+  *:focus-visible {
+    @apply outline-2 outline-offset-2 outline-brand-gold;
+  }
+}
+
+@layer components {
+  /* Gold gradient button */
+  .btn-gold {
+    @apply bg-gradient-to-r from-brand-gold to-brand-gold-soft text-brand-black font-semibold 
+           px-6 py-2.5 rounded-lg transition-all duration-200 
+           hover:shadow-gold hover:brightness-110 
+           active:scale-[0.98]
+           disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none;
+  }
+
+  .btn-outline {
+    @apply border border-brand-border text-brand-text-secondary px-6 py-2.5 rounded-lg 
+           transition-all duration-200 hover:border-brand-gold hover:text-brand-gold
+           active:scale-[0.98]
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-danger {
+    @apply bg-error/10 text-error border border-error/20 px-6 py-2.5 rounded-lg 
+           transition-all duration-200 hover:bg-error/20
+           active:scale-[0.98]
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  /* Card styles */
+  .card {
+    @apply bg-brand-card border border-brand-border rounded-xl p-6 
+           transition-all duration-200;
+  }
+
+  .card-hover {
+    @apply card hover:border-brand-border-light hover:shadow-card-hover;
+  }
+
+  /* Input styles */
+  .input-field {
+    @apply w-full bg-brand-surface border border-brand-border rounded-lg px-4 py-2.5 
+           text-brand-text placeholder:text-brand-text-muted
+           focus:border-brand-gold focus:ring-1 focus:ring-brand-gold/30 
+           transition-all duration-200 outline-none;
+  }
+
+  /* Gold accent border */
+  .gold-accent {
+    @apply border-l-2 border-l-brand-gold;
+  }
+
+  /* Status badges */
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-available {
+    @apply badge bg-success/10 text-success;
+  }
+
+  .badge-assigned {
+    @apply badge bg-brand-gold/10 text-brand-gold;
+  }
+
+  .badge-disabled {
+    @apply badge bg-error/10 text-error;
+  }
+
+  /* Sidebar nav item */
+  .nav-item {
+    @apply flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium
+           text-brand-text-secondary transition-all duration-200
+           hover:bg-brand-surface hover:text-brand-text;
+  }
+
+  .nav-item-active {
+    @apply nav-item bg-brand-gold/10 text-brand-gold border-r-2 border-r-brand-gold;
+  }
+
+  /* Skeleton loader */
+  .skeleton {
+    @apply animate-pulse bg-brand-surface rounded;
+  }
+}

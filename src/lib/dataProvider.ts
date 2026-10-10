@@ -38,8 +38,52 @@ class LocalStorageEngine {
   private getStore(): QRCode[] {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.QR_CODES)
-      if (!raw) return []
-      return JSON.parse(raw) as QRCode[]
+      if (raw) {
+        const parsed = JSON.parse(raw) as QRCode[]
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed
+        }
+      }
+
+      // Default initial seed records to ensure instant functionality on fresh installations
+      const now = new Date().toISOString()
+      const initial: QRCode[] = [
+        {
+          id: '00000000-0000-0000-0000-000000000001',
+          qr_id: '001',
+          permanent_url: 'https://product-nu-lyart.vercel.app/product/001',
+          organization_name: 'ABC Salon',
+          google_reviews_url: 'https://g.page/r/abcsalon',
+          instagram_url: 'https://instagram.com/abcsalon',
+          whatsapp_url: 'https://wa.me/919876543210',
+          website_url: 'https://abcsalon.com',
+          status: 'Assigned',
+          created_at: now,
+          updated_at: now,
+          assigned_at: now,
+        },
+      ]
+
+      for (let i = 2; i <= 50; i++) {
+        const paddedId = formatQRId(i)
+        initial.push({
+          id: `00000000-0000-0000-0000-${i.toString().padStart(12, '0')}`,
+          qr_id: paddedId,
+          permanent_url: `https://product-nu-lyart.vercel.app/product/${paddedId}`,
+          organization_name: null,
+          google_reviews_url: null,
+          instagram_url: null,
+          website_url: null,
+          whatsapp_url: null,
+          status: 'Available',
+          created_at: now,
+          updated_at: now,
+          assigned_at: null,
+        })
+      }
+
+      localStorage.setItem(STORAGE_KEYS.QR_CODES, JSON.stringify(initial))
+      return initial
     } catch {
       return []
     }

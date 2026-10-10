@@ -27,6 +27,8 @@ export default {
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        serif: ['"Playfair Display"', 'Cinzel', 'Georgia', 'serif'],
+        cinzel: ['Cinzel', 'serif'],
       },
       borderRadius: {
         lg: '0.75rem',

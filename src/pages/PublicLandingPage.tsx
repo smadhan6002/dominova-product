@@ -254,7 +254,7 @@ export default function PublicLandingPage() {
         {/* Customer Business Name Heading */}
         <div className="text-center w-full px-2">
           <h1 className="text-3xl sm:text-4xl md:text-[42px] font-bold font-serif tracking-normal text-transparent bg-clip-text bg-gradient-to-b from-[#FFF6D6] via-[#D4AF37] to-[#AA822A] drop-shadow-[0_2px_15px_rgba(212,175,55,0.3)] break-words leading-tight">
-            {state.organizationName || 'ABC Salon'}
+            Explore Us
           </h1>
 
           {/* Delicate Ornamental Gold Divider Line with central flare */}

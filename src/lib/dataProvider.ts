@@ -307,6 +307,54 @@ export const dataProvider = {
   },
 
   /**
+  /**
+   * Calculates the next sequential available QR number across all existing records.
+   * If records 001-050 exist, returns 51 (for ID 051).
+   * If no records exist, returns 1 (for ID 001).
+   */
+  async getNextAvailableNumber(): Promise<number> {
+    const existingIds = new Set<string>()
+
+    if (isSupabaseConfigured()) {
+      try {
+        const { data, error } = await supabase.from('qr_codes').select('qr_id')
+        if (!error && data) {
+          data.forEach((x: any) => {
+            if (x.qr_id) existingIds.add(String(x.qr_id).toUpperCase())
+          })
+        }
+      } catch (err) {
+        console.warn('Failed to query Supabase for next free number:', err)
+      }
+    }
+
+    const allLocal = localEngine.getAll()
+    allLocal.forEach((x) => {
+      if (x.qr_id) existingIds.add(String(x.qr_id).toUpperCase())
+    })
+
+    if (existingIds.size === 0) {
+      return 1
+    }
+
+    let highestNum = 0
+    existingIds.forEach((id) => {
+      let num = parseInt(id, 10)
+      if (isNaN(num)) {
+        const match = id.match(/\d+$/)
+        if (match) {
+          num = parseInt(match[0], 10)
+        }
+      }
+      if (!isNaN(num) && num > highestNum) {
+        highestNum = num
+      }
+    })
+
+    return highestNum + 1
+  },
+
+  /**
    * Check range availability before generating.
    * Checks whether any IDs in the requested range are already taken.
    */
@@ -323,30 +371,39 @@ export const dataProvider = {
       requestedIds.push(formatQRId(startNumber + i))
     }
 
-    let existingIds = new Set<string>()
+    const existingIds = new Set<string>()
 
     if (isSupabaseConfigured()) {
       try {
-        const { data } = await supabase.from('qr_codes').select('qr_id')
-        if (data) {
-          existingIds = new Set(data.map((x: any) => String(x.qr_id).toUpperCase()))
+        const { data, error } = await supabase.from('qr_codes').select('qr_id')
+        if (!error && data) {
+          data.forEach((x: any) => {
+            if (x.qr_id) existingIds.add(String(x.qr_id).toUpperCase())
+          })
         }
       } catch (err) {
         console.warn('Failed to query Supabase for range check:', err)
       }
     }
 
-    if (existingIds.size === 0) {
-      const all = localEngine.getAll()
-      existingIds = new Set(all.map((x) => x.qr_id.toUpperCase()))
-    }
+    // Also combine local storage records to guarantee no collisions in any mode
+    const allLocal = localEngine.getAll()
+    allLocal.forEach((x) => {
+      if (x.qr_id) existingIds.add(String(x.qr_id).toUpperCase())
+    })
 
     const conflicting = requestedIds.filter((id) => existingIds.has(id.toUpperCase()))
 
     // Calculate highest existing number to suggest next free start
     let highestNum = 0
     existingIds.forEach((id) => {
-      const num = parseInt(id, 10)
+      let num = parseInt(id, 10)
+      if (isNaN(num)) {
+        const match = id.match(/\d+$/)
+        if (match) {
+          num = parseInt(match[0], 10)
+        }
+      }
       if (!isNaN(num) && num > highestNum) {
         highestNum = num
       }

@@ -46,12 +46,20 @@ export default function BulkGeneratePage() {
 
   useEffect(() => {
     setBaseUrlInput(dataProvider.getBaseUrl())
+    // Auto-detect and suggest the next available sequential number
+    dataProvider.getNextAvailableNumber().then((nextNum) => {
+      setStartingNumberInput(formatQRId(nextNum))
+    })
   }, [])
 
-  const parsedStart = parseInt(startingNumberInput, 10) || 1
-  const parsedQuantity = parseInt(quantityInput, 10) || 50
-  const endNumber = parsedStart + parsedQuantity - 1
-  const startIdFormatted = formatQRId(parsedStart)
+  const rawStart = startingNumberInput.trim()
+  const rawQty = quantityInput.trim()
+  const parsedStart = rawStart ? parseInt(rawStart, 10) : NaN
+  const parsedQuantity = rawQty ? parseInt(rawQty, 10) : 50
+  const validStart = !isNaN(parsedStart) && parsedStart > 0 ? parsedStart : 1
+  const validQty = !isNaN(parsedQuantity) && parsedQuantity > 0 ? parsedQuantity : 50
+  const endNumber = validStart + validQty - 1
+  const startIdFormatted = formatQRId(validStart)
   const endIdFormatted = formatQRId(endNumber)
 
   const isLocalOrPreview =
@@ -62,8 +70,13 @@ export default function BulkGeneratePage() {
   // Check for range conflicts when inputs change
   useEffect(() => {
     let active = true
+
+    if (isNaN(parsedStart) || parsedStart < 1 || isNaN(parsedQuantity) || parsedQuantity < 1) {
+      setConflictWarning(null)
+      return
+    }
+
     const checkConflicts = async () => {
-      if (parsedQuantity <= 0) return
       try {
         const check = await dataProvider.checkRangeAvailability(parsedStart, parsedQuantity)
         if (active) {
@@ -90,16 +103,22 @@ export default function BulkGeneratePage() {
 
   const handleUseNextFreeNumber = () => {
     if (conflictWarning) {
-      setStartingNumberInput(formatQRId(conflictWarning.nextStart))
+      const nextStr = formatQRId(conflictWarning.nextStart)
+      setStartingNumberInput(nextStr)
       setConflictWarning(null)
-      toast.info(`Updated starting number to ${formatQRId(conflictWarning.nextStart)}`)
+      toast.info(`Set starting number to next free ID: ${nextStr}`)
     }
   }
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (parsedQuantity < 1) {
+    if (isNaN(parsedStart) || parsedStart < 1) {
+      toast.error('Starting number must be a valid positive integer (e.g. 001, 051)')
+      return
+    }
+
+    if (isNaN(parsedQuantity) || parsedQuantity < 1) {
       toast.error('Number of QR codes must be at least 1')
       return
     }
@@ -130,13 +149,15 @@ export default function BulkGeneratePage() {
           `Successfully generated and saved ${res.qrCodes.length} QR codes (${res.qrCodes[0].qr_id} to ${res.qrCodes[res.qrCodes.length - 1].qr_id})!`
         )
         setGeneratedBatch(res.qrCodes)
-        // Auto-increment the input for next generation
-        setStartingNumberInput(formatQRId(endNumber + 1))
+        setConflictWarning(null)
+        // Automatically pre-fill the starting number for the next batch
+        const nextSeq = parsedStart + parsedQuantity
+        setStartingNumberInput(formatQRId(nextSeq))
       } else {
-        toast.error(res.error || 'Failed to generate QR batch.')
+        toast.error(res.error || 'Failed to generate QR batch. Existing records preserved.')
       }
     } catch (err: any) {
-      toast.error(err.message || 'An unexpected error occurred during generation.')
+      toast.error(err.message || 'Database operation failed. No records were modified.')
     } finally {
       setGenerating(false)
     }

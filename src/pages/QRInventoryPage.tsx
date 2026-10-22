@@ -19,9 +19,11 @@ import {
   Edit2,
   ChevronLeft,
   ChevronRight,
+  Trash2,
 } from 'lucide-react'
 import type { QRCode } from '@/types/database'
 import { ConfigureQRModal } from '@/components/ConfigureQRModal'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 
 const PAGE_SIZE = 50
 
@@ -40,6 +42,25 @@ export default function QRInventoryPage() {
   // Configure modal state
   const [selectedQRId, setSelectedQRId] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<QRCode | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    try {
+      const res = await dataProvider.deleteQRCode(deleteTarget.id)
+      if (res.success) {
+        toast.success(`QR ${deleteTarget.qr_id || deleteTarget.name} deleted successfully`)
+        setDeleteTarget(null)
+        fetchQRCodes()
+      } else {
+        toast.error(res.error || 'Failed to delete QR code')
+      }
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   const fetchQRCodes = useCallback(async () => {
     setLoading(true)
@@ -229,7 +250,11 @@ export default function QRInventoryPage() {
               <tbody className="divide-y divide-[#292929]/70 bg-[#111111]">
                 {qrCodes.map((qr) => {
                   const isCopied = copiedId === qr.qr_id
-                  const isAssigned = qr.status === 'Assigned'
+                  const isAssigned = Boolean(
+                    qr.organization_name &&
+                    !qr.organization_name.startsWith('QR-') &&
+                    !qr.organization_name.match(/^\d+$/)
+                  )
 
                   return (
                     <tr key={qr.id} className="hover:bg-[#161616]/60 transition-colors">
@@ -267,7 +292,7 @@ export default function QRInventoryPage() {
                               : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
                           }`}
                         >
-                          {qr.status}
+                          {isAssigned ? 'Assigned' : qr.status === 'active' ? 'Available' : qr.status}
                         </span>
                       </td>
 
@@ -308,6 +333,16 @@ export default function QRInventoryPage() {
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                             <span>{isAssigned ? 'Edit' : 'Assign'}</span>
+                          </button>
+
+                          {/* Delete Button */}
+                          <button
+                            type="button"
+                            onClick={() => setDeleteTarget(qr)}
+                            className="p-1.5 rounded-xl border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors"
+                            title="Delete QR record"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </td>
@@ -357,6 +392,19 @@ export default function QRInventoryPage() {
           }}
         />
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Delete QR Code Record"
+        description={`Are you sure you want to delete QR ${deleteTarget?.qr_id || deleteTarget?.name}? This action will permanently remove the record from your database.`}
+        confirmText="Delete Record"
+        cancelText="Cancel"
+        variant="danger"
+        loading={deleting}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleDelete}
+      />
     </div>
   )
 }

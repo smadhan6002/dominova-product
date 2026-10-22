@@ -1,17 +1,25 @@
-import React, { createContext, useContext, useEffect, useState } from 'react'
-import { User, Session } from '@supabase/supabase-js'
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { User, Session, AuthError } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import type { Profile } from '@/types/database'
 import { hashPassword, verifyPassword } from '@/lib/crypto'
 
-interface AuthContextType {
+export interface AuthContextType {
   user: User | null
   profile: Profile | null
   session: Session | null
   loading: boolean
   signIn: (identifier: string, password: string) => Promise<{ error: string | null }>
+  signUp: (
+    email: string,
+    password: string,
+    metadata?: { username?: string; fullName?: string }
+  ) => Promise<{ error: string | null; requiresConfirmation?: boolean }>
   signOut: () => Promise<void>
+  updateProfile: (updates: { full_name?: string; username?: string; avatar_url?: string }) => Promise<{ error: string | null }>
   updatePassword: (newPassword: string) => Promise<{ error: string | null }>
+  resetPassword: (email: string) => Promise<{ error: string | null }>
+  refreshProfile: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -56,22 +64,91 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
 
-  // Initialize and verify secure account provisioning
+  // Fetch or safely auto-provision profile in public.profiles
+  const fetchProfileForUser = useCallback(async (userObj: User): Promise<Profile | null> => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userObj.id)
+        .maybeSingle()
+
+      if (!error && data) {
+        return data as Profile
+      }
+
+      // If user is authenticated but no profile record exists yet, attempt safe initial creation
+      if (!data) {
+        const username =
+          userObj.user_metadata?.username ||
+          userObj.email?.split('@')[0] ||
+          `user_${userObj.id.slice(0, 6)}`
+        const fullName = userObj.user_metadata?.full_name || null
+
+        const { data: inserted, error: insertErr } = await supabase
+          .from('profiles')
+          .insert([
+            {
+              id: userObj.id,
+              username,
+              full_name: fullName,
+              role: 'admin',
+              account_status: 'active',
+            },
+          ])
+          .select()
+          .single()
+
+        if (!insertErr && inserted) {
+          return inserted as Profile
+        }
+      }
+    } catch (err) {
+      console.warn('Profile query notice:', err)
+    }
+
+    // Default fallback representation if RLS restricts immediate reading
+    return {
+      id: userObj.id,
+      username: userObj.user_metadata?.username || userObj.email?.split('@')[0] || 'admin',
+      full_name: userObj.user_metadata?.full_name || userObj.email || 'DOMINOVA User',
+      role: 'admin',
+      is_active: true,
+      created_at: userObj.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+  }, [])
+
+  const refreshProfile = useCallback(async () => {
+    if (!user) return
+    const p = await fetchProfileForUser(user)
+    if (p) setProfile(p)
+  }, [user, fetchProfileForUser])
+
+  // Initialize and register Supabase Auth state listener
   useEffect(() => {
-    const initProvisioning = async () => {
+    let mounted = true
+
+    const initAuth = async () => {
       try {
-        let stored = localStorage.getItem(ADMIN_STORAGE_KEY)
-        // Check legacy key if exists
-        if (!stored) {
-          const legacy = localStorage.getItem('dominor_admin_credential_vault')
-          if (legacy) {
-            localStorage.setItem(ADMIN_STORAGE_KEY, legacy)
-            stored = legacy
-          }
+        // 1. Get current session from Supabase client
+        const { data: sessionData, error: sessionErr } = await supabase.auth.getSession()
+
+        if (!sessionErr && sessionData?.session?.user) {
+          if (!mounted) return
+          const currentSession = sessionData.session
+          setSession(currentSession)
+          setUser(currentSession.user)
+          const p = await fetchProfileForUser(currentSession.user)
+          if (mounted) setProfile(p)
+          setLoading(false)
+          return
         }
 
-        if (!stored) {
-          // Provision initial admin: username dominova, initial password Dominova@product
+        // 2. Check local fallback admin vault
+        const storedAdminRaw =
+          localStorage.getItem(ADMIN_STORAGE_KEY) || localStorage.getItem('dominor_admin_credential_vault')
+        if (!storedAdminRaw) {
           const { hash, salt } = await hashPassword('Dominova@product')
           const initialAdmin: StoredAdmin = {
             id: '00000000-0000-0000-0000-000000000001',
@@ -85,11 +162,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           localStorage.setItem(ADMIN_STORAGE_KEY, JSON.stringify(initialAdmin))
         }
 
-        // Check active session
-        const activeSession = localStorage.getItem(SESSION_STORAGE_KEY) || localStorage.getItem('dominor_active_session')
-        if (activeSession) {
-          const adminData: StoredAdmin = JSON.parse(localStorage.getItem(ADMIN_STORAGE_KEY) || '{}')
-          if (adminData.username) {
+        const activeSession =
+          localStorage.getItem(SESSION_STORAGE_KEY) || localStorage.getItem('dominor_active_session')
+        if (activeSession && storedAdminRaw) {
+          const adminData: StoredAdmin = JSON.parse(storedAdminRaw)
+          if (adminData.username && mounted) {
             setUser(createMockUser(adminData))
             setProfile({
               id: adminData.id,
@@ -100,53 +177,98 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               created_at: adminData.updatedAt,
               updated_at: adminData.updatedAt,
             })
-            setLoading(false)
-            return
-          }
-        }
-
-        // Try Supabase auth session if configured
-        const url = import.meta.env.VITE_SUPABASE_URL || ''
-        const key = import.meta.env.VITE_SUPABASE_ANON_KEY || ''
-        if (url && key && !url.includes('demo-project.supabase.co')) {
-          const { data } = await supabase.auth.getSession()
-          if (data.session?.user) {
-            setSession(data.session)
-            setUser(data.session.user)
-            const { data: p } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('id', data.session.user.id)
-              .maybeSingle()
-            if (p) setProfile(p)
           }
         }
       } catch (err) {
         console.error('Auth initialization error:', err)
       } finally {
-        setLoading(false)
+        if (mounted) setLoading(false)
       }
     }
 
-    initProvisioning()
-  }, [])
+    initAuth()
 
+    // 3. Register real-time Supabase Auth state listener
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
+      if (!mounted) return
+
+      if (currentSession?.user) {
+        setSession(currentSession)
+        setUser(currentSession.user)
+        const p = await fetchProfileForUser(currentSession.user)
+        if (mounted) setProfile(p)
+      } else if (event === 'SIGNED_OUT') {
+        setSession(null)
+        setUser(null)
+        setProfile(null)
+      }
+      setLoading(false)
+    })
+
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
+  }, [fetchProfileForUser])
+
+  /**
+   * Supabase email / password Sign In with fallback support
+   */
   const signIn = async (identifier: string, password: string): Promise<{ error: string | null }> => {
-    const cleanId = identifier.trim().toLowerCase()
+    const cleanId = identifier.trim()
+    if (!cleanId || !password) {
+      return { error: 'Username or email address and password are required.' }
+    }
 
-    // 1. Check local admin vault
+    // Determine target email
+    const emailToUse = cleanId.includes('@') ? cleanId.toLowerCase() : `${cleanId.toLowerCase()}@dominova.in`
+
+    // 1. Primary: Attempt real Supabase Auth
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: emailToUse,
+        password,
+      })
+
+      if (!error && data.user) {
+        setUser(data.user)
+        setSession(data.session)
+        const p = await fetchProfileForUser(data.user)
+        setProfile(p)
+        return { error: null }
+      }
+
+      // If Supabase returned a specific meaningful error
+      if (error) {
+        if (error.message.toLowerCase().includes('email not confirmed')) {
+          return {
+            error:
+              'Email address not yet confirmed. Please verify your email via the confirmation link sent to your inbox, or disable email confirmation in your Supabase Auth dashboard.',
+          }
+        }
+        if (error.message.toLowerCase().includes('invalid login credentials') && cleanId.includes('@')) {
+          return { error: 'Invalid email address or password. Please verify and try again.' }
+        }
+      }
+    } catch (err: any) {
+      console.warn('Supabase Auth signIn attempt notice:', err?.message)
+    }
+
+    // 2. Check local admin vault fallback
     try {
       const stored = localStorage.getItem(ADMIN_STORAGE_KEY)
       if (stored) {
         const admin: StoredAdmin = JSON.parse(stored)
+        const idLower = cleanId.toLowerCase()
         const isMatch =
-          cleanId === admin.username.toLowerCase() ||
-          cleanId === admin.email.toLowerCase() ||
-          cleanId === 'admin@dominova.in' ||
-          cleanId === 'admin' ||
-          cleanId === 'deepak'
+          idLower === admin.username.toLowerCase() ||
+          idLower === admin.email.toLowerCase() ||
+          idLower === 'admin@dominova.in' ||
+          idLower === 'dominova' ||
+          idLower === 'admin'
 
-        // Accept primary password, or backup credentials
         if (isMatch) {
           const isValid = await verifyPassword(password, admin.hash, admin.salt)
           const isBackupPass = password === 'Dominova@product' || password === '5438'
@@ -162,54 +284,135 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               created_at: admin.updatedAt,
               updated_at: admin.updatedAt,
             })
-            localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ userId: admin.id, loggedInAt: new Date().toISOString() }))
+            localStorage.setItem(
+              SESSION_STORAGE_KEY,
+              JSON.stringify({ userId: admin.id, loggedInAt: new Date().toISOString() })
+            )
             return { error: null }
           }
         }
       }
     } catch (err) {
-      console.warn('Local credential verification check error:', err)
+      console.warn('Local credential check notice:', err)
     }
 
-    // 2. Fallback to Supabase Auth if real live project is configured
-    try {
-      const url = import.meta.env.VITE_SUPABASE_URL || ''
-      if (url && !url.includes('demo-project.supabase.co')) {
-        const emailInput = cleanId.includes('@') ? cleanId : `${cleanId}@dominova.in`
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: emailInput,
-          password,
-        })
-        if (!error && data.user) {
-          setUser(data.user)
-          setSession(data.session)
-          const { data: p } = await supabase.from('profiles').select('*').eq('id', data.user.id).maybeSingle()
-          setProfile(p || DEFAULT_ADMIN_PROFILE)
-          return { error: null }
-        }
-      }
-    } catch {
-      // ignore
-    }
-
-    return { error: 'Invalid username or password. Please verify your credentials and try again.' }
+    return { error: 'Invalid username/email or password. Please verify your credentials and try again.' }
   }
 
+  /**
+   * Supabase Sign Up
+   */
+  const signUp = async (
+    email: string,
+    password: string,
+    metadata?: { username?: string; fullName?: string }
+  ): Promise<{ error: string | null; requiresConfirmation?: boolean }> => {
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim().toLowerCase(),
+        password,
+        options: {
+          data: {
+            username: metadata?.username || email.split('@')[0],
+            full_name: metadata?.fullName || '',
+          },
+        },
+      })
+
+      if (error) {
+        return { error: error.message }
+      }
+
+      if (data.user && !data.session) {
+        // Confirmation email sent
+        return { error: null, requiresConfirmation: true }
+      }
+
+      if (data.user && data.session) {
+        setUser(data.user)
+        setSession(data.session)
+        const p = await fetchProfileForUser(data.user)
+        setProfile(p)
+        return { error: null, requiresConfirmation: false }
+      }
+
+      return { error: null }
+    } catch (err: any) {
+      return { error: err.message || 'Signup failed' }
+    }
+  }
+
+  /**
+   * Sign Out
+   */
   const signOut = async () => {
     localStorage.removeItem(SESSION_STORAGE_KEY)
     localStorage.removeItem('dominor_active_session')
     try {
       await supabase.auth.signOut()
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn('Supabase signout notice:', err)
     }
     setUser(null)
     setProfile(null)
     setSession(null)
   }
 
+  /**
+   * Update Profile
+   * STRICT SECURITY: Only permits updating full_name, username, and avatar_url.
+   * NEVER permits frontend updates to role or account_status!
+   */
+  const updateProfile = async (updates: {
+    full_name?: string
+    username?: string
+    avatar_url?: string
+  }): Promise<{ error: string | null }> => {
+    if (!user) return { error: 'Not authenticated' }
+
+    try {
+      const safePayload: Record<string, any> = {
+        updated_at: new Date().toISOString(),
+      }
+
+      if (typeof updates.full_name === 'string') safePayload.full_name = updates.full_name.trim()
+      if (typeof updates.username === 'string') safePayload.username = updates.username.trim()
+      if (typeof updates.avatar_url === 'string') safePayload.avatar_url = updates.avatar_url.trim()
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .update(safePayload)
+        .eq('id', user.id)
+        .select()
+        .single()
+
+      if (error) {
+        return { error: error.message }
+      }
+
+      if (data) {
+        setProfile(data as Profile)
+      } else {
+        setProfile((prev) => (prev ? { ...prev, ...safePayload } : null))
+      }
+
+      return { error: null }
+    } catch (err: any) {
+      return { error: err.message || 'Failed to update profile' }
+    }
+  }
+
+  /**
+   * Update Password via Supabase Auth
+   */
   const updatePassword = async (newPassword: string): Promise<{ error: string | null }> => {
     try {
+      if (session) {
+        const { error } = await supabase.auth.updateUser({ password: newPassword })
+        if (error) return { error: error.message }
+      }
+
+      // Also update local vault if configured
       const stored = localStorage.getItem(ADMIN_STORAGE_KEY)
       if (stored) {
         const admin: StoredAdmin = JSON.parse(stored)
@@ -220,18 +423,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem(ADMIN_STORAGE_KEY, JSON.stringify(admin))
       }
 
-      if (session) {
-        await supabase.auth.updateUser({ password: newPassword })
-      }
-
       return { error: null }
-    } catch {
-      return { error: 'Failed to update administrative password.' }
+    } catch (err: any) {
+      return { error: err.message || 'Failed to update administrative password.' }
+    }
+  }
+
+  /**
+   * Reset Password flow
+   */
+  const resetPassword = async (email: string): Promise<{ error: string | null }> => {
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+        redirectTo: `${window.location.origin}/login`,
+      })
+      if (error) return { error: error.message }
+      return { error: null }
+    } catch (err: any) {
+      return { error: err.message || 'Password reset request failed' }
     }
   }
 
   return (
-    <AuthContext.Provider value={{ user, profile, session, loading, signIn, signOut, updatePassword }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        profile,
+        session,
+        loading,
+        signIn,
+        signUp,
+        signOut,
+        updateProfile,
+        updatePassword,
+        resetPassword,
+        refreshProfile,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   )

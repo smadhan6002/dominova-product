@@ -294,7 +294,11 @@ export default function DashboardPage() {
               <tbody className="divide-y divide-[#292929]/70 bg-[#111111]">
                 {recentQRs.map((qr) => {
                   const isCopied = copiedId === qr.qr_id
-                  const isAssigned = qr.status === 'Assigned'
+                  const isAssigned = Boolean(
+                    qr.organization_name &&
+                    !qr.organization_name.startsWith('QR-') &&
+                    !qr.organization_name.match(/^\d+$/)
+                  )
                   return (
                     <tr key={qr.id} className="hover:bg-[#161616]/60 transition-colors">
                       <td className="py-3 px-4 font-mono font-bold text-white">
@@ -308,7 +312,7 @@ export default function DashboardPage() {
                               : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
                           }`}
                         >
-                          {qr.status}
+                          {isAssigned ? 'Assigned' : qr.status === 'active' ? 'Available' : qr.status}
                         </span>
                       </td>
                       <td className="py-3 px-4 font-medium text-white">

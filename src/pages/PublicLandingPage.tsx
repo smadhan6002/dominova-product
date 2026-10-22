@@ -4,7 +4,7 @@ import { dataProvider } from '@/lib/dataProvider'
 import { ChevronRight, Instagram, AlertCircle, Clock } from 'lucide-react'
 
 interface PublicQRState {
-  status: 'loading' | 'available' | 'assigned' | 'not_found'
+  status: 'loading' | 'available' | 'assigned' | 'not_found' | 'inactive' | 'expired'
   qrId: string
   organizationName?: string | null
   googleReviewsUrl?: string | null
@@ -74,7 +74,13 @@ function WebsiteIcon() {
 
 export default function PublicLandingPage() {
   const params = useParams()
-  const routeId = params.id || params.qrCodeId || ''
+  const rawRouteId = params.id || params.qrCodeId || ''
+  let routeId = rawRouteId
+  try {
+    routeId = decodeURIComponent(rawRouteId).trim()
+  } catch {
+    routeId = rawRouteId.trim()
+  }
 
   const [state, setState] = useState<PublicQRState>({
     status: 'loading',
@@ -103,6 +109,18 @@ export default function PublicLandingPage() {
             instagramUrl: res.instagram_url,
             websiteUrl: res.website_url,
             whatsappUrl: res.whatsapp_url,
+          })
+        } else if (res.status === 'inactive') {
+          setState({
+            status: 'inactive',
+            qrId: res.qr_id,
+            organizationName: res.organization_name,
+          })
+        } else if (res.status === 'expired') {
+          setState({
+            status: 'expired',
+            qrId: res.qr_id,
+            organizationName: res.organization_name,
           })
         } else {
           setState({ status: 'not_found', qrId: routeId })
@@ -158,6 +176,56 @@ export default function PublicLandingPage() {
             <p className="text-xs text-[#A3A3A3] mt-2 leading-relaxed">
               The requested QR code identifier is not registered in the system.
             </p>
+          </div>
+        </div>
+        {dominovaFooter}
+      </div>
+    )
+  }
+
+  // 2b. Inactive State
+  if (state.status === 'inactive') {
+    return (
+      <div className="min-h-screen bg-[#0B0B0B] text-white flex flex-col justify-between items-center p-6 selection:bg-[#D4AF37] selection:text-black">
+        <div className="my-auto w-full max-w-sm bg-[#111111] border border-[#292929] rounded-3xl p-8 text-center space-y-4 shadow-2xl">
+          <div className="w-14 h-14 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center mx-auto shadow-[0_0_20px_rgba(245,158,11,0.2)]">
+            <Clock className="w-7 h-7" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold font-serif text-white tracking-wide">QR Code Inactive</h1>
+            <p className="text-xs text-[#A3A3A3] mt-2 leading-relaxed">
+              This QR code is currently inactive. Please contact the administrator.
+            </p>
+          </div>
+          <div className="pt-2">
+            <span className="font-mono text-xs text-[#737373] bg-[#161616] px-3 py-1.5 rounded-lg border border-[#292929]">
+              QR ID: {state.qrId}
+            </span>
+          </div>
+        </div>
+        {dominovaFooter}
+      </div>
+    )
+  }
+
+  // 2c. Expired State
+  if (state.status === 'expired') {
+    return (
+      <div className="min-h-screen bg-[#0B0B0B] text-white flex flex-col justify-between items-center p-6 selection:bg-[#D4AF37] selection:text-black">
+        <div className="my-auto w-full max-w-sm bg-[#111111] border border-[#292929] rounded-3xl p-8 text-center space-y-4 shadow-2xl">
+          <div className="w-14 h-14 rounded-2xl bg-red-500/15 border border-red-500/30 text-red-400 flex items-center justify-center mx-auto shadow-[0_0_20px_rgba(239,68,68,0.2)]">
+            <AlertCircle className="w-7 h-7" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold font-serif text-white tracking-wide">QR Code Expired</h1>
+            <p className="text-xs text-[#A3A3A3] mt-2 leading-relaxed">
+              This dynamic QR code has expired and is no longer available.
+            </p>
+          </div>
+          <div className="pt-2">
+            <span className="font-mono text-xs text-[#737373] bg-[#161616] px-3 py-1.5 rounded-lg border border-[#292929]">
+              QR ID: {state.qrId}
+            </span>
           </div>
         </div>
         {dominovaFooter}
@@ -254,7 +322,7 @@ export default function PublicLandingPage() {
         {/* Customer Business Name Heading */}
         <div className="text-center w-full px-2">
           <h1 className="text-3xl sm:text-4xl md:text-[42px] font-bold font-serif tracking-normal text-transparent bg-clip-text bg-gradient-to-b from-[#FFF6D6] via-[#D4AF37] to-[#AA822A] drop-shadow-[0_2px_15px_rgba(212,175,55,0.3)] break-words leading-tight">
-            Explore Us
+            {state.organizationName || 'Explore Us'}
           </h1>
 
           {/* Delicate Ornamental Gold Divider Line with central flare */}
@@ -266,61 +334,41 @@ export default function PublicLandingPage() {
 
         {/* The Four Destination Buttons */}
         <div className="w-full space-y-3.5 sm:space-y-4">
-          {destinationButtons.map((btn) => {
-            const hasUrl = Boolean(btn.url && btn.url.trim())
-            const targetHref = hasUrl ? normalizeDestinationUrl(btn.url, btn.id) : '#'
+          {destinationButtons
+            .filter((btn) => Boolean(btn.url && btn.url.trim()))
+            .map((btn) => {
+              const targetHref = normalizeDestinationUrl(btn.url, btn.id)
 
-            if (!hasUrl) {
               return (
-                <div
+                <a
                   key={btn.id}
-                  className="flex items-center justify-between w-full h-[60px] sm:h-[64px] px-5 sm:px-6 rounded-full bg-[#0E0E0E]/80 border border-[#222222] opacity-45 cursor-not-allowed select-none"
-                  title="Link not configured"
+                  href={targetHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group relative flex items-center justify-between w-full h-[60px] sm:h-[64px] px-5 sm:px-6 rounded-full bg-[#0B0B0B] border border-[#C9A24D]/40 transition-all duration-200 hover:border-[#D4AF37] hover:shadow-[0_0_22px_rgba(212,175,55,0.4)] active:bg-gradient-to-r active:from-[#C9A24D] active:via-[#D4AF37] active:to-[#F4C253] active:border-[#F4C253] active:shadow-[0_0_25px_rgba(244,194,83,0.5)] cursor-pointer select-none"
                 >
+                  {/* Left: Icon + Vertical Divider + Label */}
                   <div className="flex items-center h-full flex-1 min-w-0">
-                    <div className="flex items-center justify-center w-7 h-7 flex-shrink-0 grayscale">
-                      {btn.renderIcon(true)}
+                    <div className="flex items-center justify-center w-7 h-7 flex-shrink-0">
+                      {btn.renderIcon(false)}
                     </div>
-                    <div className="w-[1px] h-5 bg-[#222222] mx-4 sm:mx-5 flex-shrink-0" />
-                    <span className="font-sans font-medium text-base sm:text-[17px] text-[#666666] truncate">
+
+                    {/* Vertical Divider */}
+                    <div className="w-[1px] h-5 bg-[#262626] group-hover:bg-[#C9A24D]/45 group-active:bg-black/35 mx-4 sm:mx-5 flex-shrink-0 transition-colors" />
+
+                    {/* Button Label */}
+                    <span className="font-sans font-medium text-base sm:text-[17px] text-white group-active:text-[#0B0B0B] group-hover:text-white transition-colors truncate">
                       {btn.label}
                     </span>
                   </div>
-                  <ChevronRight className="w-5 h-5 text-[#444444] flex-shrink-0 pl-1" />
-                </div>
-              )
-            }
 
-            return (
-              <a
-                key={btn.id}
-                href={targetHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="group relative flex items-center justify-between w-full h-[60px] sm:h-[64px] px-5 sm:px-6 rounded-full bg-[#0B0B0B] border border-[#C9A24D]/40 transition-all duration-200 hover:border-[#D4AF37] hover:shadow-[0_0_22px_rgba(212,175,55,0.4)] active:bg-gradient-to-r active:from-[#C9A24D] active:via-[#D4AF37] active:to-[#F4C253] active:border-[#F4C253] active:shadow-[0_0_25px_rgba(244,194,83,0.5)] cursor-pointer select-none"
-              >
-                {/* Left: Icon + Vertical Divider + Label */}
-                <div className="flex items-center h-full flex-1 min-w-0">
-                  <div className="flex items-center justify-center w-7 h-7 flex-shrink-0">
-                    {btn.renderIcon(false)}
+                  {/* Right: Sleek Gold Chevron */}
+                  <div className="flex-shrink-0 pl-2">
+                    <ChevronRight className="w-5 h-5 text-[#C9A24D] group-active:text-[#0B0B0B] group-hover:text-[#F4C253] group-hover:translate-x-0.5 transition-all" />
                   </div>
-
-                  {/* Vertical Divider */}
-                  <div className="w-[1px] h-5 bg-[#262626] group-hover:bg-[#C9A24D]/45 group-active:bg-black/35 mx-4 sm:mx-5 flex-shrink-0 transition-colors" />
-
-                  {/* Button Label */}
-                  <span className="font-sans font-medium text-base sm:text-[17px] text-white group-active:text-[#0B0B0B] group-hover:text-white transition-colors truncate">
-                    {btn.label}
-                  </span>
-                </div>
-
-                {/* Right: Sleek Gold Chevron */}
-                <div className="flex-shrink-0 pl-2">
-                  <ChevronRight className="w-5 h-5 text-[#C9A24D] group-active:text-[#0B0B0B] group-hover:text-[#F4C253] group-hover:translate-x-0.5 transition-all" />
-                </div>
-              </a>
-            )
-          })}
+                </a>
+              )
+            })}
         </div>
       </div>
 

@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS public.qr_codes (
   instagram_url TEXT,
   website_url TEXT,
   whatsapp_url TEXT,
-  status TEXT NOT NULL DEFAULT 'Available' CHECK (status IN ('Available', 'Assigned')),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'expired')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', now()),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', now()),
   assigned_at TIMESTAMPTZ

@@ -34,6 +34,8 @@ export function ConfigureQRModal({ open, qrId, onClose, onSuccess }: ConfigureQR
 
   // Form fields
   const [organizationName, setOrganizationName] = useState('')
+  const [categoryId, setCategoryId] = useState<string>('')
+  const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([])
   const [googleReviewsUrl, setGoogleReviewsUrl] = useState('')
   const [instagramUrl, setInstagramUrl] = useState('')
   const [websiteUrl, setWebsiteUrl] = useState('')
@@ -58,10 +60,15 @@ export function ConfigureQRModal({ open, qrId, onClose, onSuccess }: ConfigureQR
       setLoading(true)
       setErrors({})
       try {
-        const record = await dataProvider.getQRCodeByQRId(qrId)
+        const [record, cats] = await Promise.all([
+          dataProvider.getQRCodeByQRId(qrId),
+          dataProvider.getCategories(),
+        ])
+        setCategories(cats)
         if (record) {
           setQrRecord(record)
           setOrganizationName(record.organization_name || '')
+          setCategoryId(record.category_id || '')
           setGoogleReviewsUrl(record.google_reviews_url || '')
           setInstagramUrl(record.instagram_url || '')
           setWebsiteUrl(record.website_url || '')
@@ -132,6 +139,7 @@ export function ConfigureQRModal({ open, qrId, onClose, onSuccess }: ConfigureQR
 
       const res = await dataProvider.configureQRCode(qrId, {
         organization_name: organizationName.trim(),
+        category_id: categoryId || null,
         google_reviews_url: googleReviewsUrl.trim() || null,
         instagram_url: instagramUrl.trim() || null,
         website_url: websiteUrl.trim() || null,
@@ -152,6 +160,12 @@ export function ConfigureQRModal({ open, qrId, onClose, onSuccess }: ConfigureQR
     }
   }
 
+  const isConfigured = Boolean(
+    qrRecord?.organization_name &&
+    !qrRecord?.organization_name.startsWith('QR-') &&
+    !qrRecord?.organization_name.match(/^\d+$/)
+  )
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto">
       <div className="bg-[#111111] border border-[#292929] rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden my-8">
@@ -163,7 +177,7 @@ export function ConfigureQRModal({ open, qrId, onClose, onSuccess }: ConfigureQR
             </div>
             <div>
               <h2 className="text-xl font-bold text-white">
-                {qrRecord?.status === 'Assigned' ? 'Edit Existing QR Code' : 'Assign QR Code'}
+                {isConfigured ? 'Edit Existing QR Code' : 'Assign QR Code'}
               </h2>
               <p className="text-xs text-[#A3A3A3] mt-0.5">
                 Configure business identity and destination buttons for physical QR #{qrId}
@@ -199,12 +213,12 @@ export function ConfigureQRModal({ open, qrId, onClose, onSuccess }: ConfigureQR
                   <div className="font-mono text-2xl font-black text-white">{qrRecord.qr_id}</div>
                   <span
                     className={`text-xs px-2.5 py-1 rounded-full font-semibold ${
-                      qrRecord.status === 'Assigned'
+                      isConfigured
                         ? 'bg-[#C9A24D]/15 text-[#C9A24D] border border-[#C9A24D]/30'
                         : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
                     }`}
                   >
-                    {qrRecord.status}
+                    {isConfigured ? 'Assigned' : 'Available'}
                   </span>
                 </div>
 
@@ -257,6 +271,24 @@ export function ConfigureQRModal({ open, qrId, onClose, onSuccess }: ConfigureQR
                 icon={<Building2 className="w-4 h-4 text-[#A3A3A3]" />}
                 autoFocus
               />
+
+              {categories.length > 0 && (
+                <div className="pt-2">
+                  <label className="text-xs font-semibold text-[#A3A3A3] block mb-1.5">Category (Optional)</label>
+                  <select
+                    value={categoryId}
+                    onChange={(e) => setCategoryId(e.target.value)}
+                    className="w-full bg-[#161616] border border-[#292929] rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-[#C9A24D]"
+                  >
+                    <option value="">No Category</option>
+                    {categories.map((cat) => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <p className="text-xs text-[#737373]">
                 This organization name will be prominently displayed as the heading on the public landing page.
               </p>

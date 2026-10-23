@@ -24,8 +24,11 @@ export interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-const ADMIN_STORAGE_KEY = 'dominova_admin_credential_vault'
-const SESSION_STORAGE_KEY = 'dominova_active_session'
+export const ADMIN_STORAGE_KEY = 'dominova_admin_credential_vault'
+export const SESSION_STORAGE_KEY = 'dominova_active_session'
+
+// Authoritative dominova administrator UUID in Supabase public.profiles & auth.users
+export const PRIMARY_ADMIN_UUID = '8acf7e82-0b89-4295-b37c-9e2a748af1a4'
 
 interface StoredAdmin {
   id: string
@@ -38,7 +41,7 @@ interface StoredAdmin {
 }
 
 const DEFAULT_ADMIN_PROFILE: Profile = {
-  id: '00000000-0000-0000-0000-000000000001',
+  id: PRIMARY_ADMIN_UUID,
   username: 'dominova',
   full_name: 'DOMINOVA Administrator',
   role: 'superadmin',
@@ -152,12 +155,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         // 2. Check local fallback admin vault
-        const storedAdminRaw =
+        let storedAdminRaw =
           localStorage.getItem(ADMIN_STORAGE_KEY) || localStorage.getItem('dominor_admin_credential_vault')
         if (!storedAdminRaw) {
           const { hash, salt } = await hashPassword('Dominova@product')
           const initialAdmin: StoredAdmin = {
-            id: '00000000-0000-0000-0000-000000000001',
+            id: PRIMARY_ADMIN_UUID,
             username: 'dominova',
             email: 'admin@dominova.in',
             fullName: 'DOMINOVA Administrator',
@@ -165,17 +168,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             hash,
             updatedAt: new Date().toISOString(),
           }
-          localStorage.setItem(ADMIN_STORAGE_KEY, JSON.stringify(initialAdmin))
+          storedAdminRaw = JSON.stringify(initialAdmin)
+          localStorage.setItem(ADMIN_STORAGE_KEY, storedAdminRaw)
+        } else {
+          // Automatic migration from dummy UUID to authoritative Supabase profile UUID
+          try {
+            const parsed = JSON.parse(storedAdminRaw)
+            if (parsed.id === '00000000-0000-0000-0000-000000000001') {
+              parsed.id = PRIMARY_ADMIN_UUID
+              storedAdminRaw = JSON.stringify(parsed)
+              localStorage.setItem(ADMIN_STORAGE_KEY, storedAdminRaw)
+            }
+          } catch {}
         }
 
         const activeSession =
           localStorage.getItem(SESSION_STORAGE_KEY) || localStorage.getItem('dominor_active_session')
         if (activeSession && storedAdminRaw) {
           const adminData: StoredAdmin = JSON.parse(storedAdminRaw)
+          const adminId = adminData.id && adminData.id !== '00000000-0000-0000-0000-000000000001' ? adminData.id : PRIMARY_ADMIN_UUID
           if (adminData.username && mounted) {
-            setUser(createMockUser(adminData))
+            setUser(createMockUser({ ...adminData, id: adminId }))
             setProfile({
-              id: adminData.id,
+              id: adminId,
               username: adminData.username,
               full_name: adminData.fullName,
               role: 'superadmin',
@@ -283,10 +298,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const isValid = await verifyPassword(password, admin.hash, admin.salt)
           const isBackupPass = password === 'Dominova@product' || password === '5438'
           if (isValid || isBackupPass) {
-            const userObj = createMockUser(admin)
+            const adminId = admin.id && admin.id !== '00000000-0000-0000-0000-000000000001' ? admin.id : PRIMARY_ADMIN_UUID
+            const userObj = createMockUser({ ...admin, id: adminId })
             setUser(userObj)
             setProfile({
-              id: admin.id,
+              id: adminId,
               username: admin.username,
               full_name: admin.fullName,
               role: 'superadmin',
@@ -296,7 +312,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             })
             localStorage.setItem(
               SESSION_STORAGE_KEY,
-              JSON.stringify({ userId: admin.id, loggedInAt: new Date().toISOString() })
+              JSON.stringify({ userId: adminId, loggedInAt: new Date().toISOString() })
             )
             return { error: null }
           }

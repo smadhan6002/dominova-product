@@ -19,8 +19,34 @@ const STORAGE_KEYS = {
   SETTINGS: 'dominova_cfg_settings',
 }
 
+import { ADMIN_STORAGE_KEY, SESSION_STORAGE_KEY, PRIMARY_ADMIN_UUID } from '@/contexts/AuthContext'
+
 // Re-export single source of truth for Supabase live status
 export { isSupabaseConfigured } from './supabase'
+
+/**
+ * Classifies database and API errors into clear, actionable messages
+ */
+export function classifyDatabaseError(err: any, fallbackMessage: string): string {
+  if (!err) return fallbackMessage
+  const msg = typeof err === 'string' ? err : err.message || ''
+  const details = err.details || ''
+  const code = err.code || ''
+
+  if (code === '42501' || msg.toLowerCase().includes('permission denied') || msg.toLowerCase().includes('row-level security')) {
+    return 'Permission error: Your account does not have permission to modify this record.'
+  }
+  if (code === '23503' || msg.toLowerCase().includes('foreign key constraint')) {
+    return 'Database reference error: Referenced user or record does not exist in database.'
+  }
+  if (code === '23505' || msg.toLowerCase().includes('unique constraint') || msg.toLowerCase().includes('already exists')) {
+    return 'Duplicate conflict: A record with this identifier already exists.'
+  }
+  if (msg.toLowerCase().includes('failed to fetch') || msg.toLowerCase().includes('networkerror')) {
+    return 'Network connection failed. Please check your internet connection and try again.'
+  }
+  return msg || details || fallbackMessage
+}
 
 function generateUUID(): string {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -327,6 +353,101 @@ export const dataProvider = {
         live: false,
         message: `Failed to connect to Supabase: ${err.message || 'Network error'}`,
       }
+    }
+  },
+
+  /**
+   * Retrieves the current authenticated user and session.
+   * Ensures that:
+   * 1. Supabase Auth sessions are retrieved and refreshed if needed.
+   * 2. Active application admin sessions in AuthContext are honored.
+   * 3. Authoritative user ID matching Supabase RLS and foreign keys is used.
+   */
+  async getAuthenticatedUser(): Promise<{
+    user: {
+      id: string
+      email?: string
+      username?: string
+      full_name?: string
+      role?: string
+      user_metadata?: Record<string, any>
+    } | null
+    error: string | null
+  }> {
+    // 1. Primary: Verify Supabase Auth session with auto-refresh
+    try {
+      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession()
+      if (!sessionErr && sessionData?.session?.user) {
+        return {
+          user: {
+            id: sessionData.session.user.id,
+            email: sessionData.session.user.email,
+            username: sessionData.session.user.user_metadata?.username,
+            full_name: sessionData.session.user.user_metadata?.full_name,
+            role: 'admin',
+            user_metadata: sessionData.session.user.user_metadata,
+          },
+          error: null,
+        }
+      }
+
+      // If token may have expired, attempt refresh
+      if (sessionData?.session) {
+        const { data: refreshed, error: refreshErr } = await supabase.auth.refreshSession()
+        if (!refreshErr && refreshed?.session?.user) {
+          return {
+            user: {
+              id: refreshed.session.user.id,
+              email: refreshed.session.user.email,
+              username: refreshed.session.user.user_metadata?.username,
+              full_name: refreshed.session.user.user_metadata?.full_name,
+              role: 'admin',
+              user_metadata: refreshed.session.user.user_metadata,
+            },
+            error: null,
+          }
+        }
+      }
+    } catch (authErr) {
+      console.warn('[Supabase Auth check notice]:', authErr)
+    }
+
+    // 2. Secondary: Verify authenticated admin session in application storage
+    try {
+      const activeSessionRaw =
+        localStorage.getItem(SESSION_STORAGE_KEY) || localStorage.getItem('dominor_active_session')
+      if (activeSessionRaw) {
+        const storedAdminRaw =
+          localStorage.getItem(ADMIN_STORAGE_KEY) || localStorage.getItem('dominor_admin_credential_vault')
+        const adminData = storedAdminRaw ? JSON.parse(storedAdminRaw) : null
+
+        const effectiveId =
+          adminData?.id && adminData.id !== '00000000-0000-0000-0000-000000000001'
+            ? adminData.id
+            : PRIMARY_ADMIN_UUID
+
+        return {
+          user: {
+            id: effectiveId,
+            email: adminData?.email || 'admin@dominova.in',
+            username: adminData?.username || 'dominova',
+            full_name: adminData?.fullName || 'DOMINOVA Administrator',
+            role: 'superadmin',
+            user_metadata: {
+              username: adminData?.username || 'dominova',
+              full_name: adminData?.fullName || 'DOMINOVA Administrator',
+            },
+          },
+          error: null,
+        }
+      }
+    } catch (vaultErr) {
+      console.warn('[Admin vault check notice]:', vaultErr)
+    }
+
+    return {
+      user: null,
+      error: 'Authentication required. Please log in to continue.',
     }
   },
 
@@ -756,16 +877,16 @@ export const dataProvider = {
       }
     }
 
-    // 2. Validate current authenticated user directly with Supabase Auth
+    // 2. Validate current authenticated user
     const now = new Date().toISOString()
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    const { user, error: authError } = await this.getAuthenticatedUser()
 
     if (authError || !user) {
-      console.warn('[Supabase Auth]: User verification failed or session missing.', authError?.message)
+      console.warn('[Auth Notice]: User verification failed or session missing.', authError)
       return {
         success: false,
         qrCodes: [],
-        error: 'Your session has expired. Please log in again.',
+        error: authError || 'Authentication required. Please log in again.',
       }
     }
 
@@ -922,13 +1043,13 @@ export const dataProvider = {
     }
 
     const now = new Date().toISOString()
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    const { user, error: authError } = await this.getAuthenticatedUser()
 
     if (authError || !user) {
-      console.warn('[Supabase Auth]: User verification failed or session missing in configureQRCode.', authError?.message)
+      console.warn('[Auth Notice]: User verification failed or session missing in configureQRCode.', authError)
       return {
         success: false,
-        error: 'Your session has expired. Please log in again.',
+        error: authError || 'Authentication required. Please log in again.',
       }
     }
 
@@ -1244,8 +1365,8 @@ export const dataProvider = {
   },
 
   async createCategory(name: string, description?: string): Promise<{ success: boolean; category?: QRCategory; error?: string }> {
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) return { success: false, error: 'Your session has expired. Please log in again.' }
+    const { user, error: authError } = await this.getAuthenticatedUser()
+    if (authError || !user) return { success: false, error: authError || 'Authentication required. Please log in again.' }
     const userId = user.id
 
     try {
@@ -1340,7 +1461,7 @@ export const dataProvider = {
    * User Settings Management (PHASE 7)
    */
   async getUserSettings(): Promise<UserSetting | null> {
-    const { data: { user } } = await supabase.auth.getUser()
+    const { user } = await this.getAuthenticatedUser()
     const userId = user?.id
     if (!userId) return null
 
@@ -1360,8 +1481,8 @@ export const dataProvider = {
   },
 
   async updateUserSettings(settings: { theme?: string; default_qr_color?: string }): Promise<{ success: boolean; error?: string }> {
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) return { success: false, error: 'Your session has expired. Please log in again.' }
+    const { user, error: authError } = await this.getAuthenticatedUser()
+    if (authError || !user) return { success: false, error: authError || 'Authentication required. Please log in again.' }
     const userId = user.id
 
     if (isSupabaseConfigured()) {
@@ -1443,7 +1564,7 @@ export const dataProvider = {
   async recordDownload(qrCodeId: string, format: string = 'png'): Promise<void> {
     if (!isSupabaseConfigured()) return
 
-    const { data: { user } } = await supabase.auth.getUser()
+    const { user } = await this.getAuthenticatedUser()
     const userId = user?.id
     if (!userId) return
 

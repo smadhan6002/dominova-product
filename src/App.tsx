@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { Toaster } from 'sonner'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 
 // Layouts
 import { AdminLayout } from '@/components/layout/AdminLayout'
@@ -32,7 +33,8 @@ export default function App() {
           richColors
           closeButton
         />
-        <Routes>
+        <ErrorBoundary>
+          <Routes>
           {/* Public Authentication */}
           <Route path="/login" element={<LoginPage />} />
 
@@ -55,6 +57,7 @@ export default function App() {
           {/* Catch-all */}
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
+        </ErrorBoundary>
       </AuthProvider>
     </BrowserRouter>
   )

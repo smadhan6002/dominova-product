@@ -1,4 +1,4 @@
-import { supabase, STORAGE_BUCKETS, buildUserStoragePath } from './supabase'
+import { supabase, STORAGE_BUCKETS, buildUserStoragePath, isSupabaseConfigured } from './supabase'
 import type {
   QRCode,
   DashboardStats,
@@ -19,19 +19,8 @@ const STORAGE_KEYS = {
   SETTINGS: 'dominova_cfg_settings',
 }
 
-// Check if live Supabase is configured
-export const isSupabaseConfigured = (): boolean => {
-  const url = import.meta.env.VITE_SUPABASE_URL || ''
-  const key = import.meta.env.VITE_SUPABASE_ANON_KEY || ''
-  return Boolean(
-    url &&
-      key &&
-      !url.includes('demo-project.supabase.co') &&
-      !url.includes('your-project.supabase.co') &&
-      !key.includes('demo-placeholder-key') &&
-      !key.includes('your-anon-key-here')
-  )
-}
+// Re-export single source of truth for Supabase live status
+export { isSupabaseConfigured } from './supabase'
 
 function generateUUID(): string {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {

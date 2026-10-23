@@ -1,17 +1,48 @@
 import { createClient } from '@supabase/supabase-js'
 
-const rawUrl = import.meta.env.VITE_SUPABASE_URL || 'https://qapoyyungfqpojnqgjur.supabase.co'
-const rawKey = import.meta.env.VITE_SUPABASE_ANON_KEY || ''
+// Production Supabase defaults matching active project (qapoyyungfqpojnqgjur)
+const DEFAULT_SUPABASE_URL = 'https://qapoyyungfqpojnqgjur.supabase.co'
+const DEFAULT_SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFhcG95eXVuZ2ZxcG9qbnFnanVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE3MjM5NDUsImV4cCI6MjEwNzI5OTk0NX0.LAuDofV-VlJySPnTUTcS_ORUTywvpmjWZeCAMVJW820'
+
+const envUrl = import.meta.env.VITE_SUPABASE_URL
+const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+// Use environment variables if set; otherwise fall back to verified project credentials
+const rawUrl = (envUrl && envUrl.trim() !== '' ? envUrl : DEFAULT_SUPABASE_URL).trim()
+const rawKey = (envKey && envKey.trim() !== '' ? envKey : DEFAULT_SUPABASE_ANON_KEY).trim()
 
 // Clean URL and Key to protect against common formatting issues (e.g. trailing period from copied prompts)
-const supabaseUrl = rawUrl.trim().replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '')
-const supabaseAnonKey = rawKey.trim().replace(/\.+$/, '')
+const supabaseUrl = rawUrl.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '')
+const supabaseAnonKey = rawKey.replace(/\.+$/, '')
 
-if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY) {
-  console.warn('Missing Supabase environment variables in .env.')
+/**
+ * Check if live Supabase is configured with valid credentials
+ */
+export const isSupabaseConfigured = (): boolean => {
+  return Boolean(
+    supabaseUrl &&
+      supabaseAnonKey &&
+      !supabaseUrl.includes('demo-project.supabase.co') &&
+      !supabaseUrl.includes('your-project.supabase.co') &&
+      !supabaseAnonKey.includes('demo-placeholder-key') &&
+      !supabaseAnonKey.includes('your-anon-key-here') &&
+      supabaseAnonKey.length > 20
+  )
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+if (!envUrl || !envKey) {
+  console.info(
+    '[DOMINOVA] VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY not set in build environment. Using configured project defaults for Supabase project: ' +
+      supabaseUrl
+  )
+}
+
+// Fallback to safe string so createClient never throws fatal uncaught exceptions at module evaluation
+const safeKey = supabaseAnonKey || DEFAULT_SUPABASE_ANON_KEY
+const safeUrl = supabaseUrl || DEFAULT_SUPABASE_URL
+
+export const supabase = createClient(safeUrl, safeKey, {
   auth: {
     autoRefreshToken: true,
     persistSession: true,

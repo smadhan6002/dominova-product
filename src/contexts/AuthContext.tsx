@@ -131,8 +131,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const initAuth = async () => {
       try {
-        // 1. Get current session from Supabase client
-        const { data: sessionData, error: sessionErr } = await supabase.auth.getSession()
+        // 1. Get current session from Supabase client with timeout protection to prevent hanging loading state
+        const sessionTimeout = new Promise<{ data: { session: null }; error: any }>((resolve) =>
+          setTimeout(() => resolve({ data: { session: null }, error: new Error('Session check timed out') }), 4000)
+        )
+        const { data: sessionData, error: sessionErr } = await Promise.race([
+          supabase.auth.getSession(),
+          sessionTimeout,
+        ])
 
         if (!sessionErr && sessionData?.session?.user) {
           if (!mounted) return
@@ -188,28 +194,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     initAuth()
 
-    // 3. Register real-time Supabase Auth state listener
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
-      if (!mounted) return
+    // 3. Register real-time Supabase Auth state listener with safety guards
+    let subscription: { unsubscribe: () => void } | null = null
+    try {
+      const authSub = supabase.auth.onAuthStateChange(async (event, currentSession) => {
+        if (!mounted) return
 
-      if (currentSession?.user) {
-        setSession(currentSession)
-        setUser(currentSession.user)
-        const p = await fetchProfileForUser(currentSession.user)
-        if (mounted) setProfile(p)
-      } else if (event === 'SIGNED_OUT') {
-        setSession(null)
-        setUser(null)
-        setProfile(null)
-      }
-      setLoading(false)
-    })
+        if (currentSession?.user) {
+          setSession(currentSession)
+          setUser(currentSession.user)
+          const p = await fetchProfileForUser(currentSession.user)
+          if (mounted) setProfile(p)
+        } else if (event === 'SIGNED_OUT') {
+          setSession(null)
+          setUser(null)
+          setProfile(null)
+        }
+        setLoading(false)
+      })
+      subscription = authSub?.data?.subscription || null
+    } catch (subErr) {
+      console.warn('Supabase auth state listener error:', subErr)
+    }
 
     return () => {
       mounted = false
-      subscription.unsubscribe()
+      subscription?.unsubscribe()
     }
   }, [fetchProfileForUser])
 
